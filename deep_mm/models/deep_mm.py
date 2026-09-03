@@ -5,17 +5,157 @@ from typing import List, Optional, Tuple
 import torch
 import torch.nn as nn
 
-from deep_mm.solvers.mmcf import (
-    gamma_from_mmcf,
-    make_hermitian,
-    mmcf_direction,
-    mmcf_terms,
-    _project_trace,
-)
+from deep_mm.common.metrics import batched_secrecy_rate_torch
+
+
+def _make_hermitian(matrix: torch.Tensor) -> torch.Tensor:
+    return 0.5 * (matrix + matrix.conj().transpose(-2, -1))
+
+
+def _eye(batch_size: int, size: int, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
+    return torch.eye(size, dtype=dtype, device=device).unsqueeze(0).expand(batch_size, size, size)
+
+
+@torch.no_grad()
+def _initial_update_scale(H: torch.Tensor, Pt: float) -> torch.Tensor:
+    if H.ndim not in (2, 3):
+        raise ValueError("H must have rank 2 or 3")
+    if float(Pt) <= 0:
+        raise ValueError("Pt must be positive")
+    single = H.ndim == 2
+    H_batch = H.unsqueeze(0) if single else H
+    gram = _make_hermitian(H_batch.conj().transpose(-2, -1) @ H_batch)
+    spectral_value = torch.linalg.eigvalsh(gram).real.max(dim=-1).values
+    delta = min(0.01 / float(Pt), 0.5)
+    scale = (float(delta) * spectral_value.square()).clamp_min(1e-12)
+    return scale[0] if single else scale
+
+
+def _project_trace(Q_tilde: torch.Tensor, Pt: float) -> torch.Tensor:
+    trace = torch.diagonal(Q_tilde, dim1=-2, dim2=-1).sum(dim=-1).real
+    scale = torch.where(
+        trace <= 0,
+        torch.zeros_like(trace),
+        torch.where(
+            trace <= Pt,
+            torch.ones_like(trace),
+            torch.as_tensor(Pt, dtype=trace.dtype, device=trace.device) / (trace + 1e-12),
+        ),
+    )
+    return Q_tilde * scale.reshape((-1,) + (1,) * (Q_tilde.ndim - 1)).to(Q_tilde.dtype)
+
+
+def _update_terms(Q: torch.Tensor, H: torch.Tensor, G: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Construct the channel-dependent matrices used by one unfolded update."""
+    if H.ndim == 2:
+        H = H.unsqueeze(0)
+        G = G.unsqueeze(0)
+        Q = Q.unsqueeze(0)
+        squeeze = True
+    else:
+        squeeze = False
+    batch_size, nr, _ = H.shape
+    ne = G.shape[1]
+    id_matrix = _eye(batch_size, nr, H.dtype, H.device)
+    ie_matrix = _eye(batch_size, ne, G.dtype, G.device)
+    xd = id_matrix + H @ Q @ H.conj().transpose(-2, -1)
+    xe = ie_matrix + G @ Q @ G.conj().transpose(-2, -1)
+    h_term = H.conj().transpose(-2, -1) @ torch.linalg.inv(xd) @ H
+    g_term = G.conj().transpose(-2, -1) @ torch.linalg.inv(xe) @ G
+    if squeeze:
+        return h_term[0], g_term[0]
+    return h_term, g_term
+
+
+def _update_direction(
+    Q: torch.Tensor,
+    h_term: torch.Tensor,
+    g_term: torch.Tensor,
+    control: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    control_value = control.real.to(dtype=Q.real.dtype, device=Q.device)
+    residual = h_term - g_term
+    if Q.ndim == 2:
+        matrix = _make_hermitian(residual + control_value.to(Q.dtype) * (Q + Q.conj().T))
+    else:
+        matrix = _make_hermitian(
+            residual
+            + control_value.reshape(-1, 1, 1).to(Q.dtype)
+            * (Q + Q.conj().transpose(-2, -1))
+        )
+    eigenvalues, vectors = torch.linalg.eigh(matrix)
+    positive = torch.relu(eigenvalues.real)
+    if Q.ndim == 2:
+        direction = (vectors * positive) @ vectors.conj().T
+    else:
+        direction = (vectors * positive.unsqueeze(-2)) @ vectors.conj().transpose(-2, -1)
+    return matrix, _make_hermitian(direction)
+
+
+def _apply_update(
+    Q: torch.Tensor,
+    h_term: torch.Tensor,
+    g_term: torch.Tensor,
+    Pt: float,
+    control: torch.Tensor,
+) -> torch.Tensor:
+    _matrix, direction = _update_direction(Q, h_term, g_term, control)
+    denominator = 2.0 * control.real.to(dtype=direction.real.dtype, device=direction.device) + 1e-12
+    if direction.ndim == 2:
+        candidate = Q + direction / denominator.to(direction.dtype)
+    else:
+        candidate = Q + direction / denominator.reshape(-1, 1, 1).to(direction.dtype)
+    if candidate.ndim == 2:
+        return _make_hermitian(_project_trace(candidate.unsqueeze(0), Pt)[0])
+    return _make_hermitian(_project_trace(candidate, Pt))
+
+
+@torch.no_grad()
+def build_training_targets(
+    H: torch.Tensor,
+    G: torch.Tensor,
+    Pt: float,
+    max_iter: int = 100,
+    tol: float = 1e-6,
+    return_trace: bool = False,
+):
+    """Build deterministic covariance targets using the unfolded update form."""
+    if H.ndim != 3 or G.ndim != 3:
+        raise ValueError("build_training_targets expects H=(B,Nr,Nt), G=(B,Ne,Nt)")
+    if H.shape[0] != G.shape[0] or H.shape[2] != G.shape[2]:
+        raise ValueError("H and G batch size and Nt must match")
+    control = _initial_update_scale(H, Pt)
+    batch_size, _nr, nt = H.shape
+    Q = (float(Pt) / nt) * _eye(batch_size, nt, H.dtype, H.device).clone()
+    rates = [batched_secrecy_rate_torch(H, G, Q)]
+    active = torch.ones(batch_size, dtype=torch.bool, device=H.device)
+    converged = torch.zeros(batch_size, dtype=torch.bool, device=H.device)
+    for _ in range(int(max_iter)):
+        h_term, g_term = _update_terms(Q, H, G)
+        candidate = _apply_update(Q, h_term, g_term, Pt, control)
+        proposed = batched_secrecy_rate_torch(H, G, candidate)
+        Q = torch.where(active[:, None, None], candidate, Q)
+        previous = rates[-1]
+        current = torch.where(active, proposed, previous)
+        rates.append(current)
+        if tol >= 0:
+            newly = active & (torch.abs(current - previous) <= float(tol))
+            converged = converged | newly
+            active = active & ~newly
+            if not torch.any(active):
+                break
+    trace = {
+        "rates": torch.stack(rates, dim=1) if return_trace else rates[-1],
+        "iterations": len(rates) - 1,
+        "converged": converged,
+        "trace_valid_length": len(rates),
+        "control": control,
+    }
+    return Q, trace
 
 
 class DeepMM(nn.Module):
-    """Graph-based projected MM-CF unfolding for direct fixed channels."""
+    """Graph-based unfolding with a deterministic projected update."""
 
     model_kind = "deep_mm"
     node_feature_dim = 4
@@ -152,12 +292,12 @@ class DeepMM(nn.Module):
         return pooled.squeeze(0) if single else pooled
 
     def scalar_gammas(self, H: torch.Tensor, Pt: float) -> torch.Tensor:
-        """Return the legacy scalar MM-CF step sizes before learned scaling."""
+        """Return legacy scalar update controls before learned scaling."""
         if self.learn_mode == "net_direct":
             raise ValueError("scalar_gammas is not used when learn_mode='net_direct'")
         single = H.dim() == 2
         H_batch = H.unsqueeze(0) if single else H
-        base = gamma_from_mmcf(H_batch, Pt).to(dtype=torch.float32)
+        base = _initial_update_scale(H_batch, Pt).to(dtype=torch.float32)
         positive = torch.nn.functional.softplus(self.u).to(device=H.device) + 1e-12
         if self.learn_mode == "direct":
             values = positive.view(1, -1).expand(H_batch.shape[0], -1)
@@ -182,12 +322,12 @@ class DeepMM(nn.Module):
             Q = (float(Pt) / nt) * torch.eye(nt, dtype=Hb.dtype, device=Hb.device).unsqueeze(0).expand(batch, nt, nt).clone()
         else:
             Q = Qb
-        Q = make_hermitian(Q)
+        Q = _make_hermitian(Q)
         scalar_gammas = None if self.learn_mode == "net_direct" else self.scalar_gammas(Hb, Pt)
         gammas, records = [], [Q]
         for layer in range(depth):
-            H_bar, G_bar = mmcf_terms(Q, Hb, Gb)
-            Q_bar = make_hermitian(H_bar - G_bar)
+            H_bar, G_bar = _update_terms(Q, Hb, Gb)
+            Q_bar = _make_hermitian(H_bar - G_bar)
             pooled = self.pooled_graph_embedding(Q, Q_bar, Hb, Gb, Pt)
             raw_gamma = self.step_heads[layer](pooled).squeeze(-1)
             if self.learn_mode == "net_direct":
@@ -195,8 +335,7 @@ class DeepMM(nn.Module):
             else:
                 scale = self.scale_min + (self.scale_max - self.scale_min) * torch.sigmoid(raw_gamma)
                 gamma = scalar_gammas[:, layer] * scale
-            _F, update_direction = mmcf_direction(Q, H_bar, G_bar, gamma)
-            Q = make_hermitian(_project_trace(Q + update_direction / (2.0 * gamma.view(-1, 1, 1).to(update_direction.dtype) + 1e-12), Pt))
+            Q = _apply_update(Q, H_bar, G_bar, Pt, gamma)
             gammas.append(gamma)
             records.append(Q)
         gamma_tensor = (

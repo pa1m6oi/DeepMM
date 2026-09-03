@@ -14,7 +14,7 @@ REQUIRED_METADATA = (
 
 STRICT_TRAINING_METADATA = (
     "training_samples", "epochs", "batch_size", "train_size", "learning_rate",
-    "mmcf_max_iter", "supervisor_epoch_num", "default_inference_layers",
+    "reference_update_max_iter", "supervisor_epoch_num", "default_inference_layers",
 )
 SUPPORTED_DEEP_MM_LAYER_COUNTS = tuple(range(1, 17))
 
@@ -53,7 +53,7 @@ def save_checkpoint(
     is_small_sample = metadata.get("artifact_scope") in {"small_sample", "early_stopped"}
     expected = {
         "training_samples": 50000, "epochs": 100, "batch_size": 200,
-        "train_size": 0.8, "learning_rate": 5e-3, "mmcf_max_iter": 100,
+        "train_size": 0.8, "learning_rate": 5e-3, "reference_update_max_iter": 100,
         "default_inference_layers": 6,
     }
     mismatches = []
@@ -174,7 +174,7 @@ def load_checkpoint(path: str, model: torch.nn.Module, expected: Optional[Dict[s
         "batch_size": 200,
         "train_size": 0.8,
         "learning_rate": 5e-3,
-        "mmcf_max_iter": 100,
+        "reference_update_max_iter": 100,
         "default_inference_layers": 6,
     }
     mismatches = []

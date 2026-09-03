@@ -4,6 +4,7 @@ import math
 from typing import Any, Dict
 
 import numpy as np
+import torch
 
 
 def hermitian_np(matrix: np.ndarray) -> np.ndarray:
@@ -47,4 +48,48 @@ def covariance_diagnostics(Q: np.ndarray, Pt: float, tol: float = 1e-5) -> Dict[
         "trace_feasible": bool(trace <= float(Pt) + tol),
         "feasible": bool(np.min(eigenvalues) >= -tol and trace <= float(Pt) + tol),
     }
+
+
+def hermitian_torch(matrix: torch.Tensor) -> torch.Tensor:
+    """Return the Hermitian part of a complex matrix or matrix batch."""
+    return 0.5 * (matrix + matrix.conj().transpose(-2, -1))
+
+
+def _torch_eye(batch_size: int, size: int, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
+    return torch.eye(size, dtype=dtype, device=device).unsqueeze(0).expand(batch_size, size, size)
+
+
+def log2det_torch(matrix: torch.Tensor) -> torch.Tensor:
+    """Evaluate the base-2 log-determinant of positive-definite matrices."""
+    sign, value = torch.linalg.slogdet(matrix)
+    if torch.any(sign.real <= 0):
+        eye = torch.eye(matrix.shape[-1], dtype=matrix.dtype, device=matrix.device)
+        sign, value = torch.linalg.slogdet(matrix + 1e-12 * eye)
+    return value.real / math.log(2.0)
+
+
+def secrecy_rate_torch(H: torch.Tensor, G: torch.Tensor, Q: torch.Tensor) -> torch.Tensor:
+    """Compute the secrecy rate for one direct-channel realization."""
+    if H.ndim != 2 or G.ndim != 2 or Q.ndim != 2:
+        raise ValueError("single-channel secrecy_rate expects matrices")
+    if H.shape[1] != G.shape[1] or Q.shape != (H.shape[1], H.shape[1]):
+        raise ValueError("inconsistent H, G, and Q dimensions")
+    id_matrix = torch.eye(H.shape[0], dtype=H.dtype, device=H.device)
+    ie_matrix = torch.eye(G.shape[0], dtype=G.dtype, device=G.device)
+    return log2det_torch(id_matrix + H @ Q @ H.conj().T) - log2det_torch(ie_matrix + G @ Q @ G.conj().T)
+
+
+def batched_secrecy_rate_torch(H: torch.Tensor, G: torch.Tensor, Q: torch.Tensor) -> torch.Tensor:
+    """Compute secrecy rates for a same-shaped batch of channels."""
+    if H.ndim != 3 or G.ndim != 3 or Q.ndim != 3:
+        raise ValueError("batched secrecy_rate expects rank-three tensors")
+    if H.shape[0] != G.shape[0] or H.shape[0] != Q.shape[0] or H.shape[2] != G.shape[2]:
+        raise ValueError("inconsistent batched channel dimensions")
+    batch_size, nr, _ = H.shape
+    ne = G.shape[1]
+    id_matrix = _torch_eye(batch_size, nr, H.dtype, H.device)
+    ie_matrix = _torch_eye(batch_size, ne, G.dtype, G.device)
+    bob = log2det_torch(id_matrix + H @ Q @ H.conj().transpose(-2, -1))
+    eve = log2det_torch(ie_matrix + G @ Q @ G.conj().transpose(-2, -1))
+    return bob - eve
 

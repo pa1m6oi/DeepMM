@@ -15,17 +15,16 @@ for the paper:
 Deep-MM is a GNN-guided fixed-depth unfolding method for transmit-covariance
 design in the fixed-antenna, ideal-CSI MIMO wiretap channel. Each unfolded
 layer predicts a positive control parameter, while the covariance update and
-power projection are computed deterministically from the MM-CF formulation.
+power projection are computed deterministically inside the unfolded model.
 
-The release also contains the deterministic MM-CF solver components and the
-original iterative MM method used as a reference implementation.
+The release also contains the original iterative MM method as a reference
+implementation.
 
 ## Methods
 
 | Component | Description | Location |
 | --- | --- | --- |
 | Deep-MM | GNN-guided fixed-depth unfolding with deterministic covariance updates | [`deep_mm/models/deep_mm.py`](deep_mm/models/deep_mm.py) |
-| MM-CF | MM-CF covariance update, projection, and rate utilities | [`deep_mm/solvers/mmcf.py`](deep_mm/solvers/mmcf.py) |
 | Original MM | Original iterative MM reference method | [`deep_mm/solvers/mm.py`](deep_mm/solvers/mm.py) |
 
 ## Repository structure
@@ -45,9 +44,8 @@ original iterative MM method used as a reference implementation.
 │   │   └── metrics.py       # Secrecy-rate and covariance metrics
 │   ├── models/
 │   │   ├── checkpoints.py   # Checkpoint serialization and validation
-│   │   └── deep_mm.py       # Deep-MM model
+│   │   └── deep_mm.py       # Deep-MM model and unfolded update
 │   └── solvers/
-│       ├── mmcf.py          # MM-CF solver components
 │       └── mm.py            # Original MM method
 └── scripts/
     ├── infer.py             # Checkpoint inference example

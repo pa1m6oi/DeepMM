@@ -1,7 +1,7 @@
 """Safeguarded water-filling MM solver.
 
-This module adapts ``work2/originalMMCF/solver.py`` to the fixed-channel
-project.  It keeps the original water-filling update but uses a rate-based
+This module contains the original iterative MM reference method for the
+fixed-channel project. It keeps the water-filling update but uses a rate-based
 majorizer backtracking safeguard so numerical two-cycles are not reported as
 the final solution.
 """
@@ -14,8 +14,7 @@ from typing import Union
 import numpy as np
 import torch
 
-from deep_mm.common.metrics import secrecy_rate_np
-from deep_mm.solvers.mmcf import make_hermitian, secrecy_rate
+from deep_mm.common.metrics import hermitian_torch, secrecy_rate_np, secrecy_rate_torch
 
 
 TensorLike = Union[np.ndarray, torch.Tensor]
@@ -58,13 +57,13 @@ def _mm_candidate(
     A = H.mH @ torch.linalg.solve(xd, H)
     L = G.mH @ torch.linalg.solve(xe, G)
     J = A - Q.mH @ M - M @ Q
-    F = make_hermitian(J - L)
+    F = hermitian_torch(J - L)
 
     eigvals, eigvecs = torch.linalg.eigh(F)
     zeta = waterfill_mu(eigvals, 2.0 * gamma_tensor * float(Pt))
     new_eigs = torch.relu(eigvals.real - zeta)
     candidate = (eigvecs * (new_eigs / (2.0 * gamma_tensor)).to(dtype=eigvecs.dtype)) @ eigvecs.mH
-    return make_hermitian(candidate)
+    return hermitian_torch(candidate)
 
 
 def waterfill_mu(eigs: torch.Tensor, target_sum: Union[float, torch.Tensor]) -> torch.Tensor:
@@ -116,9 +115,9 @@ def _run_original_mm(
     Q = (float(Pt) / nt) * it_matrix
 
     delta = min(0.01 / float(Pt), 0.5)
-    lam_max = torch.linalg.eigvalsh(make_hermitian(H_t.mH @ H_t)).real.max()
+    lam_max = torch.linalg.eigvalsh(hermitian_torch(H_t.mH @ H_t)).real.max()
     gamma = torch.clamp(delta * lam_max.square(), min=1e-12)
-    current_rate = float(secrecy_rate(H_t, G_t, Q).item())
+    current_rate = float(secrecy_rate_torch(H_t, G_t, Q).item())
     best_Q = Q.clone()
     best_rate = current_rate
     rate_history = []
@@ -134,7 +133,7 @@ def _run_original_mm(
             candidate = _mm_candidate(
                 Q, H_t, G_t, Pt, trial_gamma, id_matrix, ie_matrix, it_matrix
             )
-            candidate_rate = float(secrecy_rate(H_t, G_t, candidate).item())
+            candidate_rate = float(secrecy_rate_torch(H_t, G_t, candidate).item())
             if candidate_rate + 1e-7 >= current_rate:
                 accepted = True
                 break
@@ -164,15 +163,15 @@ def _run_original_mm(
 
     trace_q = torch.real(torch.trace(Q))
     if float(trace_q.item()) > 0.0:
-        Q = make_hermitian(Q * (float(Pt) / (trace_q + 1e-12)))
-    rate = float(secrecy_rate(H_t, G_t, Q).item())
+        Q = hermitian_torch(Q * (float(Pt) / (trace_q + 1e-12)))
+    rate = float(secrecy_rate_torch(H_t, G_t, Q).item())
     if record_history and rate_history:
         rate_history[-1] = rate
     return Q, rate, float(gamma.item()), rate_history, converged, status, backtracking_history
 
 
 @torch.no_grad()
-def solve_original_mmcf(
+def solve_original_mm(
     H: TensorLike,
     G: TensorLike,
     Pt: float,
@@ -182,7 +181,7 @@ def solve_original_mmcf(
     max_iter: int = 100,
     device: Union[torch.device, str] = "cpu",
 ):
-    """Compatibility entry point from the original solver."""
+    """Return the covariance produced by the original MM solver."""
 
     Q, rate, _gamma, _history, _converged, _status, _backtracking = _run_original_mm(
         H, G, Pt, sigma_d=sigma_d, sigma_e=sigma_e, tol=tol,
@@ -192,7 +191,7 @@ def solve_original_mmcf(
 
 
 @torch.no_grad()
-def solve_original_mmcf_with_history(
+def solve_original_mm_with_history(
     H: TensorLike,
     G: TensorLike,
     Pt: float,
@@ -202,7 +201,7 @@ def solve_original_mmcf_with_history(
     max_iter: int = 100,
     device: Union[torch.device, str] = "cpu",
 ):
-    """Compatibility entry point returning the original per-iteration history."""
+    """Return the original MM covariance and per-iteration history."""
 
     result = _run_original_mm(
         H, G, Pt, sigma_d=sigma_d, sigma_e=sigma_e, tol=tol,
@@ -263,7 +262,7 @@ class OriginalMMBeamformingEvaluator:
     device: str = "cpu"
 
     def __call__(self, H: np.ndarray, G: np.ndarray):
-        return solve_original_mmcf(
+        return solve_original_mm(
             H, G, self.Pt, max_iter=self.max_iter, tol=self.tol, device=self.device
         )
 

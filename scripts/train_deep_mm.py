@@ -16,8 +16,8 @@ if str(PACKAGE_ROOT) not in sys.path:
 from deep_mm.common.channel import sample_channels
 from deep_mm.common.config import FixedMIMOConfig
 from deep_mm.common.data import load_corpus, validate_training_corpus
-from deep_mm.solvers.mmcf import batched_secrecy_rate, run_mmcf_batch
-from deep_mm.models.deep_mm import DeepMM
+from deep_mm.common.metrics import batched_secrecy_rate_torch
+from deep_mm.models.deep_mm import DeepMM, build_training_targets
 from deep_mm.models.checkpoints import build_metadata, save_checkpoint
 
 
@@ -43,8 +43,8 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--supervisor-epoch-num", type=float, default=0.20)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cpu")
-    p.add_argument("--mmcf-max-iter", type=int, default=100)
-    p.add_argument("--mmcf-tol", type=float, default=1e-6)
+    p.add_argument("--reference-update-max-iter", type=int, default=100)
+    p.add_argument("--reference-update-tol", type=float, default=1e-6)
     p.add_argument("--corpus", default=None)
     p.add_argument("--output", required=True)
     return p
@@ -85,7 +85,11 @@ def _mean_rate(
             Pt,
             inference_layers=inference_layers,
         )
-        values.append(batched_secrecy_rate(H[start:start + batch_size], G[start:start + batch_size], q))
+        values.append(
+            batched_secrecy_rate_torch(
+                H[start:start + batch_size], G[start:start + batch_size], q
+            )
+        )
     model.train()
     return float(torch.cat(values).mean().item())
 
@@ -108,7 +112,7 @@ def _metadata(args, cfg):
         batch_size=args.batch_size,
         train_size=args.train_size,
         learning_rate=args.lr,
-        mmcf_max_iter=args.mmcf_max_iter,
+        reference_update_max_iter=args.reference_update_max_iter,
         supervisor_epoch_num=args.supervisor_epoch_num,
         default_inference_layers=6,
         learn_mode=str(getattr(args, "learn_mode", "net_direct")),
@@ -176,10 +180,14 @@ def train(args: argparse.Namespace) -> dict:
             Q, _ = model(Hb, Gb, cfg.Pt)
             if global_step < supervisor_batches:
                 with torch.no_grad():
-                    target, _ = run_mmcf_batch(Hb, Gb, cfg.Pt, args.mmcf_max_iter, args.mmcf_tol)
+                    target, _ = build_training_targets(
+                        Hb, Gb, cfg.Pt,
+                        args.reference_update_max_iter,
+                        args.reference_update_tol,
+                    )
                 loss = _loss_mse(Q, target)
             else:
-                loss = -batched_secrecy_rate(Hb, Gb, Q).mean()
+                loss = -batched_secrecy_rate_torch(Hb, Gb, Q).mean()
             if not torch.isfinite(loss):
                 raise FloatingPointError("non-finite Deep-MM loss")
             loss.backward()
