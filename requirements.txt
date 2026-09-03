@@ -1,0 +1,4 @@
+# Validated with Python 3.8.20.
+numpy==1.23.5
+torch==2.4.0
+
