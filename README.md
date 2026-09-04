@@ -1,4 +1,4 @@
-# Deep-MM: GNN-Enabled Deep Unfolding for MIMO Secure Beamforming
+# Deep-MM: REVISITING OPTIMAL MIMO SECURE BEAMFORMING:A LOW-COMPLEXITY GNN-ENABLED DEEP UNFOLDING METHOD
 
 [![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.4.0-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
@@ -7,7 +7,7 @@
 This repository provides the release implementation and a pretrained checkpoint
 for the paper:
 
-> **GNN-Enabled Deep Unfolding for Optimal MIMO Secure Beamforming**  
+> **REVISITING OPTIMAL MIMO SECURE BEAMFORMING:A LOW-COMPLEXITY GNN-ENABLED DEEP UNFOLDING METHOD**  
 > Miao Jiang, Ruijie Huang, and Yiqing Li
 
 ## Overview
