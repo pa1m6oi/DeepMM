@@ -79,15 +79,7 @@ for the `(N_t, N_r, N_e) = (4, 4, 2)` setting. The model is trained with a
 16-layer unfolding depth and uses 6 layers as the default inference depth;
 the inference depth can be selected when calling the model directly.
 
-## Citation
 
-If you use this repository, please cite:
-
-```text
-M. Jiang, R. Huang, and Y. Li,
-"GNN-Enabled Deep Unfolding for Optimal MIMO Secure Beamforming,"
-submitted to ICASSP 2027.
-```
 
 ## License
 
