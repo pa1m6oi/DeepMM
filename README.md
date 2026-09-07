@@ -8,7 +8,7 @@ This repository provides the release implementation and a pretrained checkpoint
 for the paper:
 
 > **REVISITING OPTIMAL MIMO SECURE BEAMFORMING:A LOW-COMPLEXITY GNN-ENABLED DEEP UNFOLDING METHOD**  
-> Miao Jiang, Ruijie Huang, and Yiqing Li
+> Miao Jiang, Ruijie Huang, Yiqing Li and Guangchi Zhang
 
 ## Overview
 
