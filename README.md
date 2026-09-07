@@ -1,4 +1,4 @@
-# Deep-MM: REVISITING OPTIMAL MIMO SECURE BEAMFORMING:A LOW-COMPLEXITY GNN-ENABLED DEEP UNFOLDING METHOD
+# DeepMM: REVISITING OPTIMAL MIMO SECURE BEAMFORMING:A LOW-COMPLEXITY GNN-ENABLED DEEP UNFOLDING METHOD
 
 [![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.4.0-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
@@ -12,7 +12,7 @@ for the paper:
 
 ## Overview
 
-Deep-MM is a GNN-guided fixed-depth unfolding method for transmit-covariance
+DeepMM is a GNN-guided fixed-depth unfolding method for transmit-covariance
 design in the fixed-antenna, ideal-CSI MIMO wiretap channel. Each unfolded
 layer predicts a positive control parameter, while the covariance update and
 power projection are computed deterministically inside the unfolded model.
@@ -24,7 +24,7 @@ implementation.
 
 | Component | Description | Location |
 | --- | --- | --- |
-| Deep-MM | GNN-guided fixed-depth unfolding with deterministic covariance updates | [`deep_mm/models/deep_mm.py`](deep_mm/models/deep_mm.py) |
+| DeepMM | GNN-guided fixed-depth unfolding with deterministic covariance updates | [`deep_mm/models/deep_mm.py`](deep_mm/models/deep_mm.py) |
 | Original MM | Original iterative MM reference method | [`deep_mm/solvers/mm.py`](deep_mm/solvers/mm.py) |
 
 ## Repository structure
@@ -74,7 +74,7 @@ rate, covariance feasibility diagnostics, and the layerwise control values.
 
 ## Pretrained checkpoint
 
-`checkpoints/deep_mm_nt4_nr4_ne2_L06.pt` contains the Deep-MM model trained
+`checkpoints/deep_mm_nt4_nr4_ne2_L06.pt` contains the DeepMM model trained
 for the `(N_t, N_r, N_e) = (4, 4, 2)` setting. The model is trained with a
 16-layer unfolding depth and uses 6 layers as the default inference depth;
 the inference depth can be selected when calling the model directly.
